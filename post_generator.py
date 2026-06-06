@@ -23,6 +23,19 @@ WEBSITE_URL          = "https://huurprijsverlaging.com"
 SCRIPT_DIR = Path(__file__).parent
 
 
+def get_page_token(token: str) -> str:
+    """Wissel een User token automatisch in voor een Page token als dat nodig is."""
+    resp = requests.get(
+        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}",
+        params={"fields": "access_token", "access_token": token},
+    )
+    data = resp.json()
+    if resp.ok and "access_token" in data:
+        return data["access_token"]
+    # Token was al een Page token of uitwisseling niet mogelijk
+    return token
+
+
 def load_posts() -> list:
     with open(SCRIPT_DIR / "posts.json") as f:
         return json.load(f)
@@ -141,7 +154,12 @@ def post_to_instagram_story(public_url: str) -> str:
 # ── Hoofd flow ─────────────────────────────────────────────────────────────────
 
 def run(dry_run: bool = False):
+    global FB_PAGE_ACCESS_TOKEN
     from datetime import datetime
+
+    print("Token ophalen...")
+    FB_PAGE_ACCESS_TOKEN = get_page_token(FB_PAGE_ACCESS_TOKEN)
+
     posts = load_posts()
     post = pick_post(posts)
 
