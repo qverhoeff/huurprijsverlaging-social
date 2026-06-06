@@ -1,6 +1,7 @@
 """
 Huurprijsverlaging.com — Automatische social media poster
 Post 3x per week (ma/wo/vr om 09:00) op Facebook en Instagram
+inclusief Stories op beide platforms.
 
 Gebruik:
   python post_generator.py          # post vandaag
@@ -28,30 +29,43 @@ def load_posts() -> list:
 
 
 def pick_post(posts: list) -> dict:
-    """Kies een post op basis van de datum zodat elke post-dag een andere afbeelding krijgt."""
     today = date.today()
-    # Bepaal een volgnummer: elke ma/wo/vr telt als 1 post
-    # Weekdag index: ma=0, wo=1, vr=2
     day_offset = {0: 0, 2: 1, 4: 2}.get(today.weekday(), 0)
     week_number = int(today.strftime("%Y%V"))
     post_number = week_number * 3 + day_offset
-    index = post_number % len(posts)
-    return posts[index]
+    return posts[post_number % len(posts)]
 
 
-def upload_photo_unpublished(image_bytes: bytes, filename: str) -> str:
+# ── Upload hulpfunctie ─────────────────────────────────────────────────────────
+
+def upload_photo_unpublished(image_bytes: bytes, filename: str) -> tuple[str, str]:
+    """Upload afbeelding naar Facebook. Geeft (photo_id, public_url) terug."""
     resp = requests.post(
         f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/photos",
         data={"access_token": FB_PAGE_ACCESS_TOKEN, "published": "false"},
         files={"source": (filename, image_bytes, "image/jpeg")},
     )
     resp.raise_for_status()
-    return resp.json()["id"]
+    photo_id = resp.json()["id"]
+
+    # Haal publieke URL op (nodig voor Instagram en Stories)
+    url_resp = requests.get(
+        f"https://graph.facebook.com/v19.0/{photo_id}",
+        params={"fields": "images", "access_token": FB_PAGE_ACCESS_TOKEN},
+    )
+    url_resp.raise_for_status()
+    images = url_resp.json().get("images", [])
+    if not images:
+        raise RuntimeError("Kon publieke afbeeldings-URL niet ophalen")
+    public_url = images[0]["source"]
+
+    return photo_id, public_url
 
 
-def post_to_facebook(caption: str, hashtags: str, image_bytes: bytes, filename: str) -> str:
-    photo_id = upload_photo_unpublished(image_bytes, filename)
-    full_text = f"{caption}\n\n{hashtags}\n\n🔗 {WEBSITE_URL}"
+# ── Facebook feed ──────────────────────────────────────────────────────────────
+
+def post_to_facebook_feed(caption: str, hashtags: str, photo_id: str) -> str:
+    full_text = f"{caption}\n\n{hashtags}\n\n{WEBSITE_URL}"
     resp = requests.post(
         f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/feed",
         data={
@@ -64,23 +78,32 @@ def post_to_facebook(caption: str, hashtags: str, image_bytes: bytes, filename: 
     return resp.json()["id"]
 
 
-def post_to_instagram(caption: str, hashtags: str, image_bytes: bytes, filename: str) -> str:
-    photo_id = upload_photo_unpublished(image_bytes, filename)
-    photo_resp = requests.get(
-        f"https://graph.facebook.com/v19.0/{photo_id}",
-        params={"fields": "images", "access_token": FB_PAGE_ACCESS_TOKEN},
-    )
-    photo_resp.raise_for_status()
-    images = photo_resp.json().get("images", [])
-    if not images:
-        raise RuntimeError("Kon afbeeldings-URL niet ophalen van Facebook")
-    image_url = images[0]["source"]
+# ── Facebook Story ─────────────────────────────────────────────────────────────
 
-    full_caption = f"{caption}\n\n{hashtags}\n\n🔗 {WEBSITE_URL}"
+def post_to_facebook_story(public_url: str) -> str:
+    resp = requests.post(
+        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/photo_stories",
+        data={
+            "url": public_url,
+            "access_token": FB_PAGE_ACCESS_TOKEN,
+        },
+    )
+    resp.raise_for_status()
+    return resp.json().get("post_id", resp.json().get("id", "ok"))
+
+
+# ── Instagram feed ─────────────────────────────────────────────────────────────
+
+def post_to_instagram_feed(caption: str, hashtags: str, public_url: str) -> str:
+    full_caption = f"{caption}\n\n{hashtags}\n\n{WEBSITE_URL}"
 
     container = requests.post(
         f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media",
-        data={"image_url": image_url, "caption": full_caption, "access_token": FB_PAGE_ACCESS_TOKEN},
+        data={
+            "image_url": public_url,
+            "caption": full_caption,
+            "access_token": FB_PAGE_ACCESS_TOKEN,
+        },
     )
     container.raise_for_status()
     container_id = container.json()["id"]
@@ -92,6 +115,30 @@ def post_to_instagram(caption: str, hashtags: str, image_bytes: bytes, filename:
     publish.raise_for_status()
     return publish.json()["id"]
 
+
+# ── Instagram Story ────────────────────────────────────────────────────────────
+
+def post_to_instagram_story(public_url: str) -> str:
+    container = requests.post(
+        f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media",
+        data={
+            "image_url": public_url,
+            "media_type": "STORIES",
+            "access_token": FB_PAGE_ACCESS_TOKEN,
+        },
+    )
+    container.raise_for_status()
+    container_id = container.json()["id"]
+
+    publish = requests.post(
+        f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media_publish",
+        data={"creation_id": container_id, "access_token": FB_PAGE_ACCESS_TOKEN},
+    )
+    publish.raise_for_status()
+    return publish.json()["id"]
+
+
+# ── Hoofd flow ─────────────────────────────────────────────────────────────────
 
 def run(dry_run: bool = False):
     from datetime import datetime
@@ -107,22 +154,43 @@ def run(dry_run: bool = False):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}]")
     print(f"  Afbeelding : {post['image']}")
     print(f"  Caption    : {post['caption'][:80]}...")
-    print(f"  Hashtags   : {post['hashtags']}")
 
     if dry_run:
-        print(f"\n[DRY RUN] Zou posten met afbeelding: {post['image']}")
-        print(f"[DRY RUN] Volledige caption:\n{post['caption']}\n{post['hashtags']}\n🔗 {WEBSITE_URL}")
+        print(f"\n[DRY RUN] Zou posten:")
+        print(f"  Afbeelding : {post['image']}")
+        print(f"  Caption    : {post['caption']}")
+        print(f"  Hashtags   : {post['hashtags']}")
+        print(f"  Link       : {WEBSITE_URL}")
+        print(f"  Platforms  : Facebook feed + Story / Instagram feed + Story")
         return
 
-    print("Posten op Facebook...")
-    fb_id = post_to_facebook(post["caption"], post["hashtags"], image_bytes, post["image"])
-    print(f"  ✓ Facebook post ID: {fb_id}")
+    print("Uploaden afbeelding...")
+    photo_id, public_url = upload_photo_unpublished(image_bytes, post["image"])
+    print(f"  Photo ID : {photo_id}")
 
-    print("Posten op Instagram...")
-    ig_id = post_to_instagram(post["caption"], post["hashtags"], image_bytes, post["image"])
-    print(f"  ✓ Instagram post ID: {ig_id}")
+    print("Posten op Facebook feed...")
+    fb_id = post_to_facebook_feed(post["caption"], post["hashtags"], photo_id)
+    print(f"  Facebook feed ID: {fb_id}")
 
-    print("Klaar!")
+    print("Posten op Facebook Story...")
+    try:
+        fb_story_id = post_to_facebook_story(public_url)
+        print(f"  Facebook Story ID: {fb_story_id}")
+    except Exception as e:
+        print(f"  Facebook Story mislukt (niet kritiek): {e}")
+
+    print("Posten op Instagram feed...")
+    ig_id = post_to_instagram_feed(post["caption"], post["hashtags"], public_url)
+    print(f"  Instagram feed ID: {ig_id}")
+
+    print("Posten op Instagram Story...")
+    try:
+        ig_story_id = post_to_instagram_story(public_url)
+        print(f"  Instagram Story ID: {ig_story_id}")
+    except Exception as e:
+        print(f"  Instagram Story mislukt (niet kritiek): {e}")
+
+    print("\nKlaar! Gepost op: Facebook feed + Story / Instagram feed + Story")
 
 
 if __name__ == "__main__":
