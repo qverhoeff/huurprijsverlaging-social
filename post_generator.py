@@ -107,38 +107,23 @@ def post_to_facebook_story(public_url: str) -> str:
 
 # ── Instagram feed ─────────────────────────────────────────────────────────────
 
-def post_to_instagram_feed(caption: str, hashtags: str, public_url: str) -> str:
+def post_to_instagram(caption: str, hashtags: str, image_filename: str, media_type: str = "IMAGE") -> str:
+    # Gebruik de publieke GitHub raw URL — altijd toegankelijk voor Instagram
+    github_url = f"https://raw.githubusercontent.com/qverhoeff/huurprijsverlaging-social/main/images/{image_filename}"
     full_caption = f"{caption}\n\n{hashtags}\n\n{WEBSITE_URL}"
 
+    payload = {
+        "image_url": github_url,
+        "access_token": FB_PAGE_ACCESS_TOKEN,
+    }
+    if media_type == "STORIES":
+        payload["media_type"] = "STORIES"
+    else:
+        payload["caption"] = full_caption
+
     container = requests.post(
         f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media",
-        data={
-            "image_url": public_url,
-            "caption": full_caption,
-            "access_token": FB_PAGE_ACCESS_TOKEN,
-        },
-    )
-    container.raise_for_status()
-    container_id = container.json()["id"]
-
-    publish = requests.post(
-        f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media_publish",
-        data={"creation_id": container_id, "access_token": FB_PAGE_ACCESS_TOKEN},
-    )
-    publish.raise_for_status()
-    return publish.json()["id"]
-
-
-# ── Instagram Story ────────────────────────────────────────────────────────────
-
-def post_to_instagram_story(public_url: str) -> str:
-    container = requests.post(
-        f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media",
-        data={
-            "image_url": public_url,
-            "media_type": "STORIES",
-            "access_token": FB_PAGE_ACCESS_TOKEN,
-        },
+        data=payload,
     )
     container.raise_for_status()
     container_id = container.json()["id"]
@@ -198,13 +183,13 @@ def run(dry_run: bool = False):
         print(f"  Facebook Story mislukt (niet kritiek): {e}")
 
     print("Posten op Instagram feed...")
-    ig_id = post_to_instagram_feed(post["caption"], post["hashtags"], public_url)
-    print(f"  Instagram feed ID: {ig_id}")
+    ig_id = post_to_instagram(post["caption"], post["hashtags"], post["image"])
+    print(f"  ✓ Instagram feed ID: {ig_id}")
 
     print("Posten op Instagram Story...")
     try:
-        ig_story_id = post_to_instagram_story(public_url)
-        print(f"  Instagram Story ID: {ig_story_id}")
+        ig_story_id = post_to_instagram(post["caption"], post["hashtags"], post["image"], media_type="STORIES")
+        print(f"  ✓ Instagram Story ID: {ig_story_id}")
     except Exception as e:
         print(f"  Instagram Story mislukt (niet kritiek): {e}")
 
