@@ -1,0 +1,30 @@
+name: Social Media Post
+
+on:
+  schedule:
+    # Maandag, woensdag, vrijdag om 09:00 Amsterdam (07:00 UTC zomer)
+    - cron: '0 7 * * 1,3,5'
+  workflow_dispatch: # ook handmatig te starten via GitHub
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Python installeren
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dependencies installeren
+        run: pip install -r requirements.txt
+
+      - name: Post publiceren
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          IG_BUSINESS_ACCOUNT_ID: ${{ secrets.IG_BUSINESS_ACCOUNT_ID }}
+        run: python post_generator.py
