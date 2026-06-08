@@ -127,6 +127,25 @@ def post_to_facebook_story(public_url: str) -> str:
 
 # ── Instagram feed ─────────────────────────────────────────────────────────────
 
+def wait_for_instagram_container(container_id: str, max_attempts: int = 10) -> None:
+    """Wacht tot Instagram klaar is met de afbeelding verwerken."""
+    import time
+    for attempt in range(max_attempts):
+        resp = requests.get(
+            f"https://graph.facebook.com/v19.0/{container_id}",
+            params={"fields": "status_code,status", "access_token": FB_PAGE_ACCESS_TOKEN},
+        )
+        resp.raise_for_status()
+        status = resp.json().get("status_code", "")
+        if status == "FINISHED":
+            return
+        if status == "ERROR":
+            raise RuntimeError(f"Instagram container in ERROR staat: {resp.json()}")
+        print(f"  Instagram verwerkt afbeelding ({status})... wacht 5 seconden")
+        time.sleep(5)
+    raise RuntimeError("Instagram container niet klaar na maximale wachttijd")
+
+
 def post_to_instagram(caption: str, hashtags: str, image_filename: str, media_type: str = "IMAGE") -> str:
     # Gebruik de publieke GitHub raw URL — altijd toegankelijk voor Instagram
     github_url = f"https://raw.githubusercontent.com/qverhoeff/huurprijsverlaging-social/main/images/{image_filename}"
@@ -147,6 +166,9 @@ def post_to_instagram(caption: str, hashtags: str, image_filename: str, media_ty
     )
     container.raise_for_status()
     container_id = container.json()["id"]
+
+    # Wacht tot Instagram de afbeelding heeft verwerkt
+    wait_for_instagram_container(container_id)
 
     publish = requests.post(
         f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media_publish",
