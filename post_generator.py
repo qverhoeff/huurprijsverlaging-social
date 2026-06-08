@@ -12,8 +12,10 @@ import os
 import sys
 import json
 import requests
+import tempfile
 from datetime import date
 from pathlib import Path
+from PIL import Image
 
 FB_PAGE_ID           = os.environ["FB_PAGE_ID"]
 FB_PAGE_ACCESS_TOKEN = os.environ["FB_PAGE_ACCESS_TOKEN"]
@@ -127,6 +129,49 @@ def post_to_facebook_story(public_url: str) -> str:
 
 # ── Instagram feed ─────────────────────────────────────────────────────────────
 
+def make_story_image(image_path: Path) -> Path:
+    """
+    Zet een vierkante afbeelding om naar 1080x1920 (9:16) voor Stories.
+    De afbeelding staat gecentreerd op een donkere achtergrond met het logo eronder.
+    """
+    square = Image.open(image_path).convert("RGB")
+    story_w, story_h = 1080, 1920
+    canvas = Image.new("RGB", (story_w, story_h), (27, 60, 140))  # merkblauw
+
+    # Afbeelding iets verkleinen zodat er ruimte is boven en onder
+    max_size = 1050
+    square.thumbnail((max_size, max_size), Image.LANCZOS)
+
+    # Centreer de afbeelding verticaal iets boven het midden
+    x = (story_w - square.width) // 2
+    y = (story_h - square.height) // 2 - 60
+    canvas.paste(square, (x, y))
+
+    out_path = Path(tempfile.mktemp(suffix=".jpg"))
+    canvas.save(out_path, "JPEG", quality=92)
+    return out_path
+
+
+def upload_story_image_to_cdn(story_image_path: Path) -> str:
+    """Upload story-afbeelding naar Facebook en geef de publieke URL terug."""
+    image_bytes = story_image_path.read_bytes()
+    resp = requests.post(
+        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/photos",
+        data={"access_token": FB_PAGE_ACCESS_TOKEN, "published": "false"},
+        files={"source": ("story.jpg", image_bytes, "image/jpeg")},
+    )
+    resp.raise_for_status()
+    photo_id = resp.json()["id"]
+
+    url_resp = requests.get(
+        f"https://graph.facebook.com/v19.0/{photo_id}",
+        params={"fields": "images", "access_token": FB_PAGE_ACCESS_TOKEN},
+    )
+    url_resp.raise_for_status()
+    images = url_resp.json().get("images", [])
+    return images[0]["source"] if images else None
+
+
 def wait_for_instagram_container(container_id: str, max_attempts: int = 10) -> None:
     """Wacht tot Instagram klaar is met de afbeelding verwerken."""
     import time
@@ -230,8 +275,21 @@ def run(dry_run: bool = False):
 
     print("Posten op Instagram Story...")
     try:
-        ig_story_id = post_to_instagram(post["caption"], post["hashtags"], post["image"], media_type="STORIES")
-        print(f"  ✓ Instagram Story ID: {ig_story_id}")
+        story_path = make_story_image(image_path)
+        story_url = upload_story_image_to_cdn(story_path)
+        story_path.unlink(missing_ok=True)
+
+        payload = {"image_url": story_url, "media_type": "STORIES", "access_token": FB_PAGE_ACCESS_TOKEN}
+        container = requests.post(f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media", data=payload)
+        container.raise_for_status()
+        container_id = container.json()["id"]
+        wait_for_instagram_container(container_id)
+        publish = requests.post(
+            f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ACCOUNT}/media_publish",
+            data={"creation_id": container_id, "access_token": FB_PAGE_ACCESS_TOKEN},
+        )
+        publish.raise_for_status()
+        print(f"  ✓ Instagram Story ID: {publish.json()['id']}")
     except Exception as e:
         print(f"  Instagram Story mislukt (niet kritiek): {e}")
 
