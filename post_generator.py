@@ -17,23 +17,43 @@ from pathlib import Path
 
 FB_PAGE_ID           = os.environ["FB_PAGE_ID"]
 FB_PAGE_ACCESS_TOKEN = os.environ["FB_PAGE_ACCESS_TOKEN"]
+FB_APP_ID            = "1548896920077303"
+FB_APP_SECRET        = os.environ["FB_APP_SECRET"]
 IG_BUSINESS_ACCOUNT  = os.environ["IG_BUSINESS_ACCOUNT_ID"]
 WEBSITE_URL          = "https://huurprijsverlaging.com"
 
 SCRIPT_DIR = Path(__file__).parent
 
 
-def get_page_token(token: str) -> str:
-    """Wissel een User token automatisch in voor een Page token als dat nodig is."""
+def get_page_token(short_token: str) -> str:
+    """
+    Zet een korte User token om naar een nooit-verlopende Page token:
+    1. Korte User token → lange User token (60 dagen)
+    2. Lange User token → Page token (verloopt nooit)
+    """
+    # Stap 1: wissel in voor een lange User token
     resp = requests.get(
-        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}",
-        params={"fields": "access_token", "access_token": token},
+        "https://graph.facebook.com/v19.0/oauth/access_token",
+        params={
+            "grant_type": "fb_exchange_token",
+            "client_id": FB_APP_ID,
+            "client_secret": FB_APP_SECRET,
+            "fb_exchange_token": short_token,
+        },
     )
-    data = resp.json()
-    if resp.ok and "access_token" in data:
-        return data["access_token"]
-    # Token was al een Page token of uitwisseling niet mogelijk
-    return token
+    resp.raise_for_status()
+    long_token = resp.json()["access_token"]
+    print("  Lange User token verkregen.")
+
+    # Stap 2: wissel in voor een Page token (verloopt nooit)
+    resp2 = requests.get(
+        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}",
+        params={"fields": "access_token", "access_token": long_token},
+    )
+    resp2.raise_for_status()
+    page_token = resp2.json().get("access_token", long_token)
+    print("  Permanente Page token verkregen.")
+    return page_token
 
 
 def load_posts() -> list:
