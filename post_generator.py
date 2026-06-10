@@ -30,44 +30,16 @@ SCRIPT_DIR = Path(__file__).parent
 
 # ── Token ophalen ──────────────────────────────────────────────────────────────
 
-def get_page_token(token: str) -> str:
-    """
-    Haal een geldige Page token op.
-    Probeert eerst de token direct te gebruiken als Page token.
-    Als dat mislukt, wisselt het een korte User token in voor een lange,
-    en haalt daar een permanente Page token uit.
-    """
-    # Probeer direct een Page token te halen (werkt als het een (lange) User token is)
+def verify_token(token: str) -> str:
+    """Controleer of de token geldig is en geef hem terug."""
     resp = requests.get(
-        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}",
-        params={"fields": "access_token", "access_token": token},
+        "https://graph.facebook.com/v19.0/me",
+        params={"access_token": token},
     )
-    if resp.ok and "access_token" in resp.json():
-        print("  Page token verkregen (direct).")
-        return resp.json()["access_token"]
-
-    # Fallback: wissel korte User token in voor lange, dan Page token
-    print("  Directe uitwisseling mislukt, probeer via lange token...")
-    exchange = requests.get(
-        "https://graph.facebook.com/v19.0/oauth/access_token",
-        params={
-            "grant_type": "fb_exchange_token",
-            "client_id": FB_APP_ID,
-            "client_secret": FB_APP_SECRET,
-            "fb_exchange_token": token,
-        },
-    )
-    exchange.raise_for_status()
-    long_token = exchange.json()["access_token"]
-
-    resp2 = requests.get(
-        f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}",
-        params={"fields": "access_token", "access_token": long_token},
-    )
-    resp2.raise_for_status()
-    page_token = resp2.json().get("access_token", long_token)
-    print("  Permanente Page token verkregen.")
-    return page_token
+    if not resp.ok:
+        raise RuntimeError(f"Token ongeldig: {resp.json().get('error', {}).get('message', 'Onbekende fout')}")
+    print(f"  Token geldig voor: {resp.json().get('name', 'onbekend')}")
+    return token
 
 
 # ── Post selectie ──────────────────────────────────────────────────────────────
@@ -220,8 +192,8 @@ def run(dry_run: bool = False):
     global FB_PAGE_ACCESS_TOKEN
     from datetime import datetime
 
-    print("Token ophalen...")
-    FB_PAGE_ACCESS_TOKEN = get_page_token(FB_PAGE_ACCESS_TOKEN)
+    print("Token controleren...")
+    FB_PAGE_ACCESS_TOKEN = verify_token(FB_PAGE_ACCESS_TOKEN)
 
     posts = load_posts()
     post = pick_post(posts)
