@@ -207,19 +207,29 @@ def run(dry_run: bool = False):
     if not image_path.exists():
         raise FileNotFoundError(f"Afbeelding niet gevonden: {image_path}")
 
+    post_type = post.get("type", "text_photo")
+
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}]")
+    print(f"  Type       : {post_type}")
     print(f"  Afbeelding : {post['image']}")
     print(f"  Caption    : {post['caption'][:80]}...")
 
     if dry_run:
-        print(f"\n[DRY RUN] Zou posten: {post['image']}")
+        print(f"\n[DRY RUN] Zou posten: {post['image']} ({post_type})")
         print(f"  Caption  : {post['caption']}")
         print(f"  Hashtags : {post['hashtags']}")
         return
 
-    # Maak formaat-varianten
-    feed_path  = make_feed_image(image_path)   # 1080x1350 (4:5) voor Instagram feed
-    story_path = make_story_image(image_path)  # 1080x1920 (9:16) voor Stories
+    # text_photo kaarten zijn al 1080x1350 (4:5) — geen conversie nodig voor feed
+    # photo_only: center-crop naar 4:5 voor feed
+    if post_type == "text_photo":
+        feed_path = image_path          # Kaart is al 4:5
+        cleanup_feed = False
+    else:
+        feed_path = make_feed_image(image_path)
+        cleanup_feed = True
+
+    story_path = make_story_image(image_path)   # 9:16 voor Stories
 
     # Upload origineel voor Facebook feed
     print("Uploaden voor Facebook...")
@@ -227,8 +237,10 @@ def run(dry_run: bool = False):
 
     # Upload feed-versie voor Instagram feed
     print("Uploaden voor Instagram feed (4:5)...")
-    _, feed_url = upload_to_facebook_cdn(feed_path, "feed.jpg")
-    feed_path.unlink(missing_ok=True)
+    feed_filename = post["image"] if not cleanup_feed else "feed.jpg"
+    _, feed_url = upload_to_facebook_cdn(feed_path, feed_filename)
+    if cleanup_feed:
+        feed_path.unlink(missing_ok=True)
 
     # Upload story-versie voor Stories
     print("Uploaden voor Stories (9:16)...")
