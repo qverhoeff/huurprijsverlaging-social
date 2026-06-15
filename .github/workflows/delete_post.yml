@@ -1,0 +1,47 @@
+name: Verwijder post
+
+on:
+  workflow_dispatch:
+    inputs:
+      fb_post_id:
+        description: 'Facebook post ID'
+        required: false
+      ig_post_id:
+        description: 'Instagram post ID'
+        required: false
+      ig_story_id:
+        description: 'Instagram Story ID'
+        required: false
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verwijder posts
+        env:
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import os, requests, sys
+
+          token = os.environ["FB_PAGE_ACCESS_TOKEN"]
+          fb_post_id  = "${{ github.event.inputs.fb_post_id }}"
+          ig_post_id  = "${{ github.event.inputs.ig_post_id }}"
+          ig_story_id = "${{ github.event.inputs.ig_story_id }}"
+
+          def delete(obj_id, label):
+              if not obj_id:
+                  return
+              r = requests.delete(
+                  f"https://graph.facebook.com/v19.0/{obj_id}",
+                  params={"access_token": token}
+              )
+              if r.ok and r.json().get("success"):
+                  print(f"✓ {label} verwijderd")
+              else:
+                  print(f"✗ {label} mislukt: {r.json()}")
+
+          delete(fb_post_id,  "Facebook feed")
+          delete(ig_post_id,  "Instagram feed")
+          delete(ig_story_id, "Instagram Story")
+          EOF
