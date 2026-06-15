@@ -71,28 +71,33 @@ def pick_post(posts: list) -> dict:
 
 # ── Afbeelding helpers ─────────────────────────────────────────────────────────
 
+def _crop_fill(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Schaal en crop vanuit het midden zodat de afbeelding het canvas precies vult."""
+    src_w, src_h = img.size
+    scale = max(target_w / src_w, target_h / src_h)
+    new_w = int(src_w * scale)
+    new_h = int(src_h * scale)
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    x = (new_w - target_w) // 2
+    y = (new_h - target_h) // 2
+    return img.crop((x, y, x + target_w, y + target_h))
+
+
 def make_feed_image(image_path: Path) -> Path:
-    """Zet vierkante afbeelding om naar 4:5 (1080x1350) voor Instagram feed."""
+    """4:5 (1080x1350) voor Instagram feed — vult volledig zonder gekleurde randen."""
     img = Image.open(image_path).convert("RGB")
-    canvas = Image.new("RGB", (1080, 1350), (27, 60, 140))  # merkblauw onderaan
-    # Afbeelding past precies breed, centreer verticaal iets naar boven
-    img = img.resize((1080, 1080), Image.LANCZOS)
-    canvas.paste(img, (0, 0))
+    img = _crop_fill(img, 1080, 1350)
     out = Path(tempfile.mktemp(suffix=".jpg"))
-    canvas.save(out, "JPEG", quality=92)
+    img.save(out, "JPEG", quality=92)
     return out
 
 
 def make_story_image(image_path: Path) -> Path:
-    """Zet vierkante afbeelding om naar 9:16 (1080x1920) voor Stories."""
+    """9:16 (1080x1920) voor Stories — vult volledig zonder gekleurde randen."""
     img = Image.open(image_path).convert("RGB")
-    img.thumbnail((1050, 1050), Image.LANCZOS)
-    canvas = Image.new("RGB", (1080, 1920), (27, 60, 140))
-    x = (1080 - img.width) // 2
-    y = (1920 - img.height) // 2 - 60
-    canvas.paste(img, (x, y))
+    img = _crop_fill(img, 1080, 1920)
     out = Path(tempfile.mktemp(suffix=".jpg"))
-    canvas.save(out, "JPEG", quality=92)
+    img.save(out, "JPEG", quality=92)
     return out
 
 
